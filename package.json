@@ -1,0 +1,33 @@
+{
+  "name": "btc-covenant",
+  "version": "0.0.1",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@cmdcode/buff": "^2.2.4",
+    "@cmdcode/crypto-tools": "^2.7.4",
+    "@cmdcode/tapscript": "^1.4.4",
+    "@types/ecurve": "^1.0.3",
+    "axios": "^1.6.2",
+    "bitcore-lib-inquisition": "10.0.29-dev.1",
+    "dotenv": "^16.4.5",
+    "ecpair": "^2.1.0",
+    "ecurve": "^1.0.6",
+    "node-fetch": "^3.3.2",
+    "regtest-client": "^0.2.1",
+    "scrypt-bitcore-lib": "^10.0.21"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

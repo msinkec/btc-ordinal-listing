@@ -1,0 +1,114 @@
+- Gx = 79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798
+- e must end with 0x01. Mutate TX until it does. Should take 256 tries on average, pretty quick.
+- e' = slice(e, 0, -1)
+- s = 1 + e
+
+
+inputs: <e'>
+tapscript: <Gx> OP_2DUP OP_SWAP <0x02> OP_CAT OP_CAT OP_SWAP OP_CHECKSIGVERIFY
+
+- after execution, if valid, it leaves <e'> on the stack
+
+
+Moving onto the sigHash:
+
+- tagHash = sha256("BIP0340/challenge")
+- e = sha256(tagHash || tagHash || Gx || Gx || sigHash)
+
+inputs: <sigHash> <e'>
+tapscript:  
+           OP_OVER <tagHash || tagHash || Gx || Gx> OP_SWAP OP_CAT
+           OP_SHA56 OP_OVER OP_1 OP_CAT OP_EQUALVERIFY
+           <Gx> OP_DUP OP_2 OP_ROLL OP_2 OP_CAT OP_CAT OP_SWAP OP_CHECKSIGVERIFY
+
+- creates e from sigHash and validates, leaves sigHash on stack
+
+And finally, the sigHash preimage:
+
+- preimage actually needs to be assembled from 80 byte chunks, because of MAX_STANDARD_TAPSCRIPT_STACK_ITEM_SIZE
+- final preimage cannot exceed 520 bytes
+
+inputs: <preimage> <sigHash> <e'>
+tapscript:  
+           OP_OVER <tagHash || tagHash || Gx || Gx> OP_SWAP OP_CAT
+           OP_SHA256 OP_OVER OP_1 OP_CAT OP_EQUALVERIFY
+           <Gx> OP_DUP OP_2 OP_ROLL OP_2 OP_CAT OP_CAT OP_SWAP OP_CHECKSIGVERIFY
+           OP_OVER OP_SHA256 OP_EQUALVERIFY
+
+- leaves preimage on stack
+
+
+Now, to assemble the preimage from chunks, and constrain a specific chunk (preimageChunk_x):
+
+inputs: 
+    <preimageChunk_0> <preimageChunk_1> ... <preimageChunk_n>
+    <sigHash> <e'>
+tapscript:
+           OP_OVER <tagHash || tagHash || Gx || Gx> OP_SWAP OP_CAT
+           OP_SHA256 OP_OVER OP_1 OP_CAT OP_EQUALVERIFY
+           <Gx> OP_DUP OP_2 OP_ROLL OP_2 OP_CAT OP_CAT OP_SWAP OP_CHECKSIGVERIFY
+           OP_TOALTSTACK  // Move <sigHash> to alt stack
+
+           if (x != n) {
+               repeat((n - x) - 1) {
+                OP_CAT
+               }
+           }
+           <preimageChunk_x> OP_SWAP OP_CAT
+           repeat(x) {
+            OP_CAT
+           }
+           OP_SHA256 OP_FROMALTSTACK OP_EQUAL
+           
+
+Sighash preimage format for tapscripts:
+
+
+f40a48df4b2a70c8b4924bf2654661ed3d95fd66a313eb87237597c628e4a031  // sha256('TapSighash')
+f40a48df4b2a70c8b4924bf2654661ed3d95fd66a313eb87237597c628e4a031  // sha256('TapSighash')
+00   // epoch
+00   // sighash type
+02000000   // tx version (32b LE)
+0b000000   // nLockTime  (32b LE)
+208b2b00ffa9f0fc726d4fdb0b60d3ced044eae4d7d1db4170f5b386ccfbb831   // sha256(prevouts)
+f10ca6fb162d356e0501d1e4f8d756b16760e52da9513d31c363da2b04abe183   // sha256(spentAmounts - concated spent amounts of EACH input)
+6dc41c5ea2667befc7fa45646ba7597d6afb5ab35db593ae26697d1926481921   // sha256(spentScripts - concated output scripts of EACH input)
+23e9829bfb4e23fbd3c4848baa035af15d73bcb83e510f7f097f90a21a4280d2   // sha256(sequences - concated sequence numbers of EACH input)
+f30fc1eabb71ec562a4a1da08b72bfabf2205d126b1ff5a5f3ac043069c492b8   // sha256(outputs)  - if using SIGHASH_ALL
+02   // spend type - (extFlag << 1) + (execdata.annexPresent ? 1 : 0)
+00000000  // input number TODO: if using SIGHASH_ANYONECANPAY, then there will be some other data here
+x    // hash of annex data, if it's present
+x    // sha256(output), if using SIGHASH_SINGLE
+9e9f8f66ffac8d7917b2dcb2156190863b91e31d769ba611c69fd30ba6f77a4e   // tapleaf hash
+00   // key version 
+ffffffff  // codeseparator position
+
+
+Ordinal listing:
+
+inputs: 
+    <preimage_txVer || preimage_nLockTime> 
+    <preimage_hashPrevouts || preimage_hashSpentAmounts> 
+    <preimage_hashSpentScripts || preimage_hashSequences> 
+    <preimage_spendType || preimage_inputNumber || preimage_tapleafHash || preimage_keyVersion || preiamge_codeSeparator>
+    <preimage_ordDestOutput>
+    <preimage_changeOutput>
+    <sigHash> <e'>
+tapscript:
+           OP_OVER <tagHash || tagHash || Gx || Gx> OP_SWAP OP_CAT
+           OP_SHA256 OP_OVER OP_1 OP_CAT OP_EQUALVERIFY
+           <Gx> OP_DUP OP_2 OP_ROLL OP_2 OP_CAT OP_CAT OP_SWAP OP_CHECKSIGVERIFY
+           OP_TOALTSTACK                        // Move <sigHash> to alt stack
+           <preimage_paymentOutput>
+           OP_SWAP OP_CAT OP_CAT OP_SHA256      // Assemble and hash outputs
+           OP_SWAP
+           OP_CAT
+           OP_CAT
+           OP_CAT
+           OP_CAT
+           OP_SIZE <0xd200> OP_EQUALVERIFY      // Check preimage size so far to avoid sighash flag in wrong place
+            // Add sighash type, epoch value and tweak prefixes to preimage. 0x00 - SIGHASH_ALL, 0x00 - epoch, 0xf40a...031 - tweak prefix
+           <0xf40a48df4b2a70c8b4924bf2654661ed3d95fd66a313eb87237597c628e4a031f40a48df4b2a70c8b4924bf2654661ed3d95fd66a313eb87237597c628e4a0310000>
+           OP_SWAP OP_CAT
+           OP_SHA256 OP_FROMALTSTACK OP_EQUAL   // Hash assembled preimage and compare against sighash
+           
